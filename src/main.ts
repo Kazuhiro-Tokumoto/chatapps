@@ -811,28 +811,85 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                         firstRand = peerRand; // 相手が先
                         secondRand = rand; // 自分が後
                     }
-                    aesKeyhash = await deriveAesKeySafe(
-                        await sha256(
-                            await sha512(
-                                combine(
-                                    await sha512(
-                                        combine(
+
+
+                         const { datarand } = await supabase
+                        .from('friend_sessions')
+                        .select('he_uuid, hash') // 必要な列だけ選ぶ
+                        .eq('my_uuid', storedUuid)
+                        .eq('he_uuid', peerUuid)
+                        .maybeSingle();
+                         
+
+
+                        if (!datarand) {
+                                // 【行がない場合】
+                                console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
+                                try{
+                                    const hash =  combine(await sha512(firstRand),await sha512(secondRand));
+                                    aesKeyhash = await deriveAesKeySafe(
+                                        await sha256(
                                             await sha512(
-                                                firstRand
-                                            )
-                                            , 
-                                            await sha512(
-                                                secondRand
+                                                combine(
+                                                    await sha512(
+                                                        hash
+                                                    ), await sha512(aes as Uint8Array
+
+                                                    )
+                                                )
                                             )
                                         )
-                                    ), await sha512(aes as Uint8Array
+                                    )
 
+                                    const {error} = await supabase
+                                    .from('friend_sessions') // 書き込み先のテーブル名
+                                    .insert([
+                                        { 
+                                        he_uuid: peerUuid, // ここにペアの文字列
+                                        hash: hash, // ここに乱数
+                                        my_uuid: storedUuid // 自分のUUID
+                                        }
+                                    ]);
+
+                                    if (error) {
+                                    console.error("書き込みエラー:", error.message);
+                                    } else {
+                                    console.log("いいゾォ、行の追加に成功した！");
+                                    }
+
+
+
+                                }catch(e){
+                                    console.error("乱数生成に失敗:", e);
+                                }
+                                // ここで新しい乱数を生成し、あとで insert (upsert) するフローへ
+                            } else {
+                                try{
+                                // 【行がある場合】
+                                // data[0].hashed_rand を使って鍵を復元！
+                                const hash = datarand.hash
+                            aesKeyhash = await deriveAesKeySafe(
+                                    await sha256(
+                                        await sha512(
+                                            combine(
+                                                await sha512(
+                                                    hash
+                                                ), await sha512(aes as Uint8Array
+
+                                                )
+                                            )
+                                        )
                                     )
                                 )
-                            )
-                        )
-                    )
-                    console.log(" AES鍵ハッシュが完成しました！");
+                            } catch(e){
+                                console.error("既存乱数からの鍵復元に失敗:", e);
+
+                            }
+                        }
+
+                    // 行（データ）を追加して書き込む
+
+                console.log(" AES鍵ハッシュが完成しました！");
 
                 } catch (e) {
                     console.error("鍵交換エラー:", e);
