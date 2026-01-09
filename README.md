@@ -49,6 +49,14 @@ pip install -r requirements.txt
 python secure_chat.py
 ```
 
+#### インタラクティブな例の実行
+
+完全な会話の例を見るには:
+
+```bash
+python example.py
+```
+
 #### テストの実行
 
 ```bash
