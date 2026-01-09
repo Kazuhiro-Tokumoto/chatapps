@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+        <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="MyChatApp">
+
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Login & Raspberry Pi WSS</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <style>
+        body { font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; background: #eef2f3; margin: 0; }
+        .card { background: white; padding: 30px; border-radius: 15px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); text-align: center; max-width: 450px; width: 90%; }
+        h2 { color: #333; margin-bottom: 20px; }
+        .btn-google { background: #4285F4; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-bottom: 10px; }
+        .btn-logout { background: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; margin-top: 20px; }
+        #status { margin-top: 20px; padding: 15px; background: #f9f9f9; border-radius: 8px; text-align: left; font-size: 13px; border: 1px solid #ddd; white-space: pre-wrap; }
+        .success { color: #2e7d32; font-weight: bold; }
+        .error { color: #d32f2f; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <h2>My Chat App (WSS Test)</h2>
+    <div id="auth-ui">
+        <button class="btn-google" onclick="signIn()">Googleでログイン</button>
+    </div>
+    <div id="status">ステータス: 初期化中...</div>
+</div>
+
+<script>
+    const SUPABASE_URL = 'https://cedpfdoanarzyxcroymc.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_E5jwgv5t2ONFKg3yFENQmw_lVUSFn4i';
+    
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+async function signIn() {
+    await supabaseClient.auth.signInWithOAuth({
+        provider: 'google',
+        options: { 
+            redirectTo: window.location.href,
+            //scopes: 'https://www.googleapis.com/auth/drive.appdata' // これ！
+        }
+    });
+}
+
+    async function signOut() {
+        await supabaseClient.auth.signOut();
+        location.reload();
+    }
+
+async function init() {
+        const statusDiv = document.getElementById('status');
+        const authUi = document.getElementById('auth-ui');
+
+        // 1. セッション（ログイン状態）の取得
+        const { data: { session }, error } = await supabaseClient.auth.getSession();
+
+        if (error) {
+            statusDiv.innerHTML = `<span class="error">Authエラー: ${error.message}</span>`;
+            return;
+        }
+
+        if (session) {
+            const user = session.user;
+            
+            // --- ★ ここが重要：データを「保持」して「転送」 ---
+            
+            // 1. ブラウザの保管庫(localStorage)にカギを詰め込む
+            localStorage.setItem("my_token", session.access_token);
+            localStorage.setItem("my_uuid", user.id);
+            localStorage.setItem("my_name", user.user_metadata.full_name || "不明なユーザー");
+
+            statusDiv.innerHTML = `<span class="success">✅ 認証成功！チャット画面へ移動します...</span>`;
+            
+            // 2. 0.5秒後くらいにチャット画面へ転送（少し待つとユーザーが安心します）
+            setTimeout(() => {
+                window.location.href = "./dist/index.html";
+            }, 500);
+
+        } else {
+            statusDiv.innerText = 'ステータス: 未ログイン';
+        }
+    }
+
+    // 起動
+    init();
+</script>
+
+</body>
+</html>
