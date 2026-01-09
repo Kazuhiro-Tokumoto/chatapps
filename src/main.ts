@@ -812,7 +812,7 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                         secondRand = rand; // 自分が後
                     }
 
-
+try{
                          const { datarand } = await supabase
                         .from('friend_sessions')
                         .select('he_uuid, hash') // 必要な列だけ選ぶ
@@ -822,10 +822,10 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                          
 
 
-                        if (datarand.he_uuid === null || datarand === null) {
+                        if (!datarand) {
                                 // 【行がない場合】
                                 console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
-                                try{
+                               
                                     const hash =  combine(await sha512(firstRand),await sha512(secondRand));
                                     aesKeyhash = await deriveAesKeySafe(
                                         await sha256(
@@ -860,12 +860,10 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
 
 
 
-                                }catch(e){
-                                    console.error("乱数生成に失敗:", e);
-                                }
+
                                 // ここで新しい乱数を生成し、あとで insert (upsert) するフローへ
                             } else {
-                                try{
+                                
                                 // 【行がある場合】
                                 // data[0].hashed_rand を使って鍵を復元！
                                 const hash = await base64ToUint8Array(datarand.hash);
@@ -882,10 +880,6 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                                         )
                                     )
                                 )
-                            } catch(e){
-                                console.error("既存乱数からの鍵復元に失敗:", e);
-
-                            }
                         }
 
                     // 行（データ）を追加して書き込む
@@ -897,6 +891,9 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                 }
                 console.log("🔑 鍵交換プロセス完了");
                 addSystemMsg("メッセージを送信できます");
+            }catch (e) {
+                console.error("DH処理エラー:", e);
+            }
 
 
                 // wss.onmessage の中の data.type === "message" の部分

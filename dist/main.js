@@ -631,16 +631,16 @@ async function main() {
                         firstRand = peerRand; // 相手が先
                         secondRand = rand; // 自分が後
                     }
-                    const { datarand } = await supabase
-                        .from('friend_sessions')
-                        .select('he_uuid, hash') // 必要な列だけ選ぶ
-                        .eq('uuid', storedUuid)
-                        .eq('he_uuid', peerUuid)
-                        .maybeSingle();
-                    if (datarand.he_uuid === null || datarand === null) {
-                        // 【行がない場合】
-                        console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
-                        try {
+                    try {
+                        const { datarand } = await supabase
+                            .from('friend_sessions')
+                            .select('he_uuid, hash') // 必要な列だけ選ぶ
+                            .eq('uuid', storedUuid)
+                            .eq('he_uuid', peerUuid)
+                            .maybeSingle();
+                        if (!datarand) {
+                            // 【行がない場合】
+                            console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
                             const hash = combine(await sha512(firstRand), await sha512(secondRand));
                             aesKeyhash = await deriveAesKeySafe(await sha256(await sha512(combine(await sha512(hash), await sha512(aes)))));
                             const hashb64 = await arrayBufferToBase64(hash);
@@ -659,31 +659,26 @@ async function main() {
                             else {
                                 console.log("いいゾォ、行の追加に成功した！");
                             }
+                            // ここで新しい乱数を生成し、あとで insert (upsert) するフローへ
                         }
-                        catch (e) {
-                            console.error("乱数生成に失敗:", e);
-                        }
-                        // ここで新しい乱数を生成し、あとで insert (upsert) するフローへ
-                    }
-                    else {
-                        try {
+                        else {
                             // 【行がある場合】
                             // data[0].hashed_rand を使って鍵を復元！
                             const hash = await base64ToUint8Array(datarand.hash);
                             aesKeyhash = await deriveAesKeySafe(await sha256(await sha512(combine(await sha512(hash), await sha512(aes)))));
                         }
-                        catch (e) {
-                            console.error("既存乱数からの鍵復元に失敗:", e);
-                        }
+                        // 行（データ）を追加して書き込む
+                        console.log(" AES鍵ハッシュが完成しました！");
                     }
-                    // 行（データ）を追加して書き込む
-                    console.log(" AES鍵ハッシュが完成しました！");
+                    catch (e) {
+                        console.error("鍵交換エラー:", e);
+                    }
+                    console.log("🔑 鍵交換プロセス完了");
+                    addSystemMsg("メッセージを送信できます");
                 }
                 catch (e) {
-                    console.error("鍵交換エラー:", e);
+                    console.error("DH処理エラー:", e);
                 }
-                console.log("🔑 鍵交換プロセス完了");
-                addSystemMsg("メッセージを送信できます");
                 // wss.onmessage の中の data.type === "message" の部分
             }
             else if (data.type === "message" && data.name !== name) {
