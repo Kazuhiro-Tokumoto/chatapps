@@ -840,13 +840,14 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                                             )
                                         )
                                     )
+                                    const hashb64 = await arrayBufferToBase64(hash);
 
                                     const {error} = await supabase
                                     .from('friend_sessions') // 書き込み先のテーブル名
                                     .insert([
                                         { 
                                         he_uuid: peerUuid, // ここにペアの文字列
-                                        hash: hash, // ここに乱数
+                                        hash: hashb64, // ここに乱数
                                         uuid: storedUuid // 自分のUUID
                                         }
                                     ]);
@@ -867,7 +868,7 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                                 try{
                                 // 【行がある場合】
                                 // data[0].hashed_rand を使って鍵を復元！
-                                const hash = datarand.hash
+                                const hash = await base64ToUint8Array(datarand.hash);
                             aesKeyhash = await deriveAesKeySafe(
                                     await sha256(
                                         await sha512(
