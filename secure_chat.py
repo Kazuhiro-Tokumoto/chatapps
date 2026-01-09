@@ -38,7 +38,7 @@ class SecureChatCrypto:
         self.kex_private_key = X25519PrivateKey.generate()
         self.kex_public_key = self.kex_private_key.public_key()
     
-    def get_public_keys(self) -> Dict[str, bytes]:
+    def get_public_keys(self) -> Dict[str, str]:
         """
         Export public keys for sharing with other users.
         
@@ -194,8 +194,7 @@ class SecureChatCrypto:
         
         return {
             'encrypted': encrypted,
-            'signature': signature,
-            'plaintext_for_signature': message  # For verification (sent separately or known)
+            'signature': signature
         }
     
     def verify_and_decrypt_message(self, secure_message: Dict[str, str], 
