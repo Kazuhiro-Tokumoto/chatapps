@@ -813,12 +813,14 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                     }
 
 try{
-                         const { datarand } = await supabase
-                        .from('friend_sessions')
-                        .select('he_uuid, hash') // 必要な列だけ選ぶ
-                        .eq('uuid', storedUuid)
-                        .eq('he_uuid', peerUuid)
-                        .maybeSingle();
+                        const { data: datarand, error } = await supabase
+                            .from('friend_sessions')
+                            .select('hash')
+                            .eq('he_uuid', peerUuid)
+                            .eq('uuid', storedUuid)
+                            .maybeSingle();
+
+
                          
 
 

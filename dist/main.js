@@ -632,11 +632,11 @@ async function main() {
                         secondRand = rand; // 自分が後
                     }
                     try {
-                        const { datarand } = await supabase
+                        const { data: datarand, error } = await supabase
                             .from('friend_sessions')
-                            .select('he_uuid, hash') // 必要な列だけ選ぶ
-                            .eq('uuid', storedUuid)
+                            .select('hash')
                             .eq('he_uuid', peerUuid)
+                            .eq('uuid', storedUuid)
                             .maybeSingle();
                         if (!datarand.hash) {
                             // 【行がない場合】
