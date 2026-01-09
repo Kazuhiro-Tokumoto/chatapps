@@ -822,7 +822,7 @@ try{
                          
 
 
-                        if (!datarand) {
+                        if (!datarand.hash) {
                                 // 【行がない場合】
                                 console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
                                

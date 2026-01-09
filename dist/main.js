@@ -638,7 +638,7 @@ async function main() {
                             .eq('uuid', storedUuid)
                             .eq('he_uuid', peerUuid)
                             .maybeSingle();
-                        if (!datarand) {
+                        if (!datarand.hash) {
                             // 【行がない場合】
                             console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
                             const hash = combine(await sha512(firstRand), await sha512(secondRand));
