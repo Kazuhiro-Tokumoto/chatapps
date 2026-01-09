@@ -816,7 +816,7 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                          const { datarand } = await supabase
                         .from('friend_sessions')
                         .select('he_uuid, hash') // 必要な列だけ選ぶ
-                        .eq('my_uuid', storedUuid)
+                        .eq('uuid', storedUuid)
                         .eq('he_uuid', peerUuid)
                         .maybeSingle();
                          
@@ -847,7 +847,7 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                                         { 
                                         he_uuid: peerUuid, // ここにペアの文字列
                                         hash: hash, // ここに乱数
-                                        my_uuid: storedUuid // 自分のUUID
+                                        uuid: storedUuid // 自分のUUID
                                         }
                                     ]);
 
