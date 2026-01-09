@@ -822,7 +822,7 @@ if (data.type === "dh-start" || data.type === "join-broadcast") {
                          
 
 
-                        if (!datarand) {
+                        if (datarand.he_uuid === null || datarand === null) {
                                 // 【行がない場合】
                                 console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
                                 try{
