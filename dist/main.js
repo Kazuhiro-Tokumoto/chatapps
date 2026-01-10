@@ -2,15 +2,13 @@
 import { generateEd25519KeyPair, generateX25519KeyPair } from "./mojyu-ru/crypto/ecdh.js";
 import { arrayBufferToBase64, base64ToUint8Array } from "./mojyu-ru/base64.js"; // 16進数変換のみ残す
 import { generateSalt, generateMasterSeed } from "./mojyu-ru/crypto/saltaes.js";
-import { dhs } from "./mojyu-ru/joins.js";
-import { deriveAesKeySafe, testPublicKeyFetch } from "./mojyu-ru/crypto/kdf.js";
-import { decrypt, encrypt, deriveKeyFromPin, deriveSharedKey, aesKeyToArray } from "./mojyu-ru/crypto/aes.js";
+import { PublicKeyFetch } from "./mojyu-ru/crypto/kdf.js";
+import { encrypt, deriveKeyFromPin } from "./mojyu-ru/crypto/aes.js";
 // @supabase/supabase-js ではなく、URLを直接指定する
 // @ts-ignore
 import { createClient
 // @ts-ignore
  } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
-import { sha256, sha512, combine } from "./mojyu-ru/crypto/hash.js";
 // --- 実行デモ ---
 // 32バイトのシード（本来はPINから生成）
 async function main() {
@@ -20,10 +18,10 @@ async function main() {
     const roomCard = document.createElement("div");
     roomCard.style.cssText = "background: white; padding: 30px; border-radius: 15px; box-shadow: 0 12px 28px rgba(0,0,0,0.1); text-align: center;";
     const inputroom = document.createElement("input");
-    inputroom.placeholder = "ルーム名を入力...";
+    inputroom.placeholder = "UUIDを入力...";
     inputroom.style.cssText = "width: 250px; padding: 12px; border-radius: 8px; border: 1px solid #ddd; outline: none; font-size: 16px; margin-bottom: 15px; display: block;";
     const btnroom = document.createElement("button");
-    btnroom.textContent = "ルームに参加";
+    btnroom.textContent = "メッセージをチェック";
     btnroom.style.cssText = "width: 100%; padding: 12px; border-radius: 8px; border: none; background: #0084ff; color: white; font-weight: bold; cursor: pointer;";
     roomCard.append(inputroom, btnroom);
     roomSelection.append(roomCard);
@@ -47,6 +45,10 @@ async function main() {
     chatContainer.append(chatHeader, chatBox, inputContainer);
     document.body.appendChild(chatContainer);
     function addMediaBubble(url, uuidName, originalName, isMe, subType) {
+        const chatBox = document.getElementById("chatBox");
+        if (!chatBox)
+            return;
+        // 1. コンテナ作成（吹き出しの枠）
         const container = document.createElement("div");
         container.style.cssText = `
         max-width: 70%; 
@@ -55,64 +57,79 @@ async function main() {
         align-self: ${isMe ? "flex-end" : "flex-start"};
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 6px;
         background: ${isMe ? "#0084ff" : "#e4e6eb"};
         border-radius: 15px;
         ${isMe ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;"}
     `;
-        const isVideo = originalName.toLowerCase().endsWith(".mp4") ||
-            originalName.toLowerCase().endsWith(".mov") ||
-            originalName.toLowerCase().endsWith(".webm");
-        const isAudio = originalName.toLowerCase().endsWith(".m4a") || originalName.toLowerCase().endsWith(".mp3") || originalName.toLowerCase().endsWith(".wav") || subType === "audio";
+        // 2. ファイルタイプの判定
+        const lowerName = originalName.toLowerCase();
+        // 動画判定
+        const isVideo = lowerName.endsWith(".mp4") || lowerName.endsWith(".mov") || lowerName.endsWith(".webm");
+        // 音声判定 (subTypeも見る)
+        const isAudio = subType === "audio" || lowerName.endsWith(".m4a") || lowerName.endsWith(".mp3") || lowerName.endsWith(".wav");
+        // 表示名
         const displayName = originalName || uuidName;
-        if (subType === "image") {
+        // 3. 中身の要素を作る
+        if (subType === "image" && !isVideo && !isAudio) {
+            // --- 🖼️ 画像の場合 ---
             const img = document.createElement("img");
             img.src = url;
-            img.style.cssText = "width: 100%; max-width: 250px; border-radius: 12px;";
+            img.style.cssText = "width: 100%; max-width: 250px; border-radius: 12px; cursor: pointer;";
+            // 画像をクリックしたら別タブで開く（拡大表示用）
+            img.onclick = () => window.open(url, '_blank');
             container.appendChild(img);
         }
         else if (isVideo) {
-            // 動画プレーヤー
+            // --- 🎥 動画の場合 ---
             const video = document.createElement("video");
             video.src = url;
             video.controls = true;
+            // iOSなどでインライン再生できるように
+            video.setAttribute("playsinline", "true");
             video.style.cssText = "width: 100%; max-width: 250px; border-radius: 12px;";
             container.appendChild(video);
         }
         else if (isAudio) {
-            // --- 🎤 ここ！音声プレーヤーを確実に呼び出す ---
+            // --- 🎤 音声の場合 ---
             const audio = document.createElement("audio");
             audio.src = url;
             audio.controls = true;
-            // m4aなどはブラウザによってサイズが不安定なので幅を固定する
             audio.style.cssText = "width: 100%; min-width: 200px; max-width: 250px; height: 40px;";
             container.appendChild(audio);
-            const link = document.createElement("a");
-            link.href = url;
-            link.download = uuidName;
-            link.textContent = `${displayName}`;
-            link.style.cssText = `
-            padding: 10px; background: rgba(255,255,255,0.2);
-            color: ${isMe ? "white" : "#0084ff"}; border-radius: 8px;
-            text-decoration: none; font-weight: bold; text-align: center;
-            border: 1px solid rgba(0,0,0,0.1);
-        `;
-            container.appendChild(link);
         }
-        // ファイル名ラベル（共通）
+        else {
+            // --- 📁 その他のファイル (ZIP, PDF, EXEなど) ---
+            // ここがないと、謎の空白の吹き出しになってしまいます！
+            const fileIcon = document.createElement("div");
+            fileIcon.textContent = "📄 ファイル";
+            fileIcon.style.cssText = `
+            font-size: 24px; 
+            text-align: center; 
+            margin-bottom: 5px;
+        `;
+            container.appendChild(fileIcon);
+        }
+        // 4. ファイル名＆ダウンロードリンク（全タイプ共通）
         const nameLabel = document.createElement("a");
-        nameLabel.href = url; // 復号されたデータのURL
-        nameLabel.download = originalName; // 保存時のファイル名（UUID）
-        nameLabel.textContent = `DLfile ${displayName}`; // 画面上の表示名
+        nameLabel.href = url;
+        nameLabel.download = originalName; // ちゃんと拡張子付きの名前で保存させる
+        nameLabel.textContent = `📥 ${displayName}`; // アイコンをつけると分かりやすい
         nameLabel.style.cssText = `
-    font-size: 11px; 
-    color: ${isMe ? "rgba(255,255,255,0.9)" : "#0084ff"}; 
-    margin-top: 4px;
-    text-decoration: underline;
-    cursor: pointer;
-    word-break: break-all;
-`;
+        font-size: 12px; 
+        color: ${isMe ? "rgba(255,255,255,0.9)" : "#0084ff"}; 
+        text-decoration: none;
+        font-weight: bold;
+        cursor: pointer;
+        word-break: break-all;
+        display: block;
+        margin-top: 4px;
+    `;
+        // ホバー時に下線をつける（JSでCSS擬似クラスは書けないのでmouseenterで代用）
+        nameLabel.onmouseenter = () => nameLabel.style.textDecoration = "underline";
+        nameLabel.onmouseleave = () => nameLabel.style.textDecoration = "none";
         container.appendChild(nameLabel);
+        // 5. 画面に追加してスクロール
         chatBox.appendChild(container);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
@@ -306,6 +323,59 @@ async function main() {
         // 3. 画面をリロードして初期状態（ログイン前）に戻す
         location.reload();
     }
+    // メッセージ1件を受け取って、復号して表示する関数
+    async function processDecryption(msg) {
+        if (!aesKeyhash)
+            return; // 鍵がまだないなら何もしない
+        try {
+            // 1. Base64 をバイナリ(Uint8Array)に戻す
+            // (サーバーから受け取る iv と data は必ず Base64 文字列です)
+            const [iv, encryptedData] = await Promise.all([
+                base64ToUint8Array(msg.iv),
+                base64ToUint8Array(msg.data)
+            ]);
+            // 2. 復号実行 (AES-GCM)
+            const decryptedBuffer = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: iv.buffer }, aesKeyhash, // グローバル変数の共通鍵
+            encryptedData.buffer);
+            // 3. バイナリを整える
+            const cleanData = new Uint8Array(decryptedBuffer);
+            // 4. 「これは自分か？」を判定 (UUIDで比較)
+            // storedUuid は自分のUUIDが入っているグローバル変数
+            const isMe = (msg.uuid === storedUuid);
+            // 5. 表示処理
+            // --- 画像・動画・音声・ファイルの場合 ---
+            if (["image", "file", "audio"].includes(msg.subType)) {
+                // MIMEタイプの判定
+                let mime = msg.mimeType || "application/octet-stream";
+                if (!msg.mimeType && msg.fileName) {
+                    const fname = msg.fileName.toLowerCase();
+                    if (fname.endsWith(".jpg") || fname.endsWith(".jpeg"))
+                        mime = "image/jpeg";
+                    else if (fname.endsWith(".png"))
+                        mime = "image/png";
+                    else if (fname.endsWith(".mp3"))
+                        mime = "audio/mpeg";
+                    else if (fname.endsWith(".mp4"))
+                        mime = "video/mp4";
+                }
+                const blob = new Blob([cleanData], { type: mime });
+                const url = URL.createObjectURL(blob);
+                // マインさんが作った addMediaBubble を呼び出す
+                addMediaBubble(url, msg.name || "Unknown", msg.originalName || msg.fileName, isMe, msg.subType);
+                // --- テキストの場合 ---
+            }
+            else {
+                const text = new TextDecoder().decode(cleanData);
+                // マインさんが作った addBubble を呼び出す
+                addBubble(text, isMe);
+            }
+        }
+        catch (e) {
+            console.error("復号失敗:", e);
+            // エラー時の表示（必要ならコメントアウトを外す）
+            // addBubble("🔒 解読できないメッセージ", (msg.uuid === storedUuid));
+        }
+    }
     async function sendEncryptedMessage(text, aeskey) {
         if (!aeskey) {
             console.error("エラー: AES鍵がまだ生成されていません。相手が接続するまで待ってください。");
@@ -394,32 +464,6 @@ async function main() {
         }
         return data;
     }
-    async function testEd25519Signature(privateKey, publicKey) {
-        const encoder = new TextEncoder();
-        // 1. 署名したいメッセージをバイナリ（Uint8Array）に変換
-        const message = "マイン・プロトコル、テスト送信開始！車⭐︎";
-        const data = encoder.encode(message);
-        console.log("📝 署名中...");
-        // 2. 署名実行（Ed25519）
-        const signature = await window.crypto.subtle.sign({
-            name: "Ed25519"
-        }, privateKey, data);
-        // 署名結果は64バイトのバイナリ
-        const sigHex = Array.from(new Uint8Array(signature))
-            .map(b => b.toString(16).padStart(2, '0')).join('');
-        console.log("✅ 署名完了（64バイトHex）:", sigHex);
-        // 3. 検証実行
-        console.log("🔍 検証中...");
-        const isValid = await window.crypto.subtle.verify({
-            name: "Ed25519"
-        }, publicKey, signature, data);
-        if (isValid) {
-            console.log("🚀 検証成功！このメッセージは正真正銘、マインさんの鍵で署名されています。");
-        }
-        else {
-            console.error("❌ 検証失敗... 鍵かデータが一致していません。");
-        }
-    }
     // 実験：相手のUUID（画像にあった d1fde...）を使って、公開鍵だけを引っこ抜く
     async function restoreKey(pin) {
         // 1. DBからデータを取得
@@ -462,7 +506,9 @@ async function main() {
             console.log("✅ 正しく自分を更新できた。出発進行！");
             return {
                 privateKey,
-                publicKey
+                publicKey,
+                xPriv, // 👈 これを追加！
+                xPub // 👈 これを追加！
             }; // ここで新規登録時は終了
         }
         // --- 【復元ルート】DBにデータがある場合 ---
@@ -538,201 +584,174 @@ async function main() {
         if (wss && wss.readyState === WebSocket.OPEN) {
             wss.send(JSON.stringify({
                 type: "leave",
-                room: room,
                 name: name,
                 uuid: storedUuid
             }));
         }
     });
-    btnroom.addEventListener("click", () => {
-        room = inputroom.value || "defaultroom";
-        chatHeader.textContent = `Room: ${room}`;
-        roomSelection.style.display = "none";
-        chatContainer.style.display = "flex";
-        // --- ここが重要！ ---
-        const joinMsg = JSON.stringify({
-            type: "join",
-            room: room,
-            name: name,
-            uuid: storedUuid,
-            token: storedToken
-        });
-        // まだ接続中なら onopen を待つ
-        wss.onopen = () => {
-            console.log("🚀 Connection opened, sending JOIN");
-            wss.send(joinMsg);
-        };
-        // すでに接続済み（OPEN）なら、その場ですぐ送る！
-        if (wss.readyState === WebSocket.OPEN) {
-            console.log("⚡ Already open, sending JOIN immediately");
-            wss.send(joinMsg);
+    // ▼▼▼ ここからスタート ▼▼▼
+    // ★ async を追加（これで await が使えます）
+    btnroom.addEventListener("click", async () => {
+        // 1. 入力チェック
+        const inputVal = inputroom.value.trim();
+        if (!inputVal || inputVal.length < 8 || inputVal.length > 64) {
+            alert("有効なUUIDを入力してください（8〜64文字）");
+            return;
         }
-        wss.onmessage = async (event) => {
-            const data = JSON.parse(event.data);
-            console.log("受信メッセージ:", data);
-            if (data.type === "join-ack")
-                addSystemMsg("参加しました");
-            if (data.type === "join-nack")
-                addSystemMsg("エラー: ルームに参加できませんでした");
-            if (data.type === "quit-broadcast" || data.type === "leave" || data.type === "leave-broadcast") {
-                addSystemMsg((data.name ? data.name.substring(0, 8) : "誰か") + "が退出しました");
-                aesKeyhash = null; // 鍵をリセット
-                aeskey = null;
+        // 2. ボタンを検索中モードに変更（連打防止）
+        const originalBtnText = btnroom.textContent;
+        btnroom.textContent = "検索中...";
+        btnroom.disabled = true;
+        try {
+            // 3. ★データベースから相手を探す（一番大事な部分！）
+            // (PublicKeyFetch関数を使って、名前と鍵を取りに行きます)
+            const targetProfile = await PublicKeyFetch(inputVal, supabase);
+            if (!targetProfile) {
+                throw new Error("ユーザーが見つかりません。UUIDが正しいか確認してください。");
             }
-            if (data.type === "join-broadcast") {
-                addSystemMsg(data.name.substring(0, 8) + "が参加しました");
+            console.log("✅ 相手が見つかりました:", targetProfile.username);
+            // 4. 画面切り替え
+            roomSelection.style.display = "none";
+            chatContainer.style.display = "flex";
+            // ★ヘッダーに「相手の名前」を表示！
+            chatHeader.textContent = `相手: ${targetProfile.username}`;
+            // ============================================================
+            //  ここから下は WebSocket通信ロジック (マインさんのコード統合版)
+            // ============================================================
+            const joinMsg = JSON.stringify({
+                type: "join",
+                name: name, // 自分の名前 (グローバル変数)
+                uuid: storedUuid, // 自分のUUID (グローバル変数)
+                token: storedToken // 自分のトークン
+            });
+            // 接続済みなら即送信、まだなら接続時に送信
+            if (wss.readyState === WebSocket.OPEN) {
+                console.log("⚡ Already open, sending JOIN");
+                wss.send(joinMsg);
             }
-            if (data.type === "dh-start" || data.type === "join-broadcast") {
-                if (data.name === name)
-                    return;
-                // ★追加：直近1秒以内に、この相手(uuid)に鍵を送っていたら無視する
-                const targetUuid = data.uuid; // 相手のUUIDが入っていると仮定
-                const now = Date.now();
-                const lastSent = dhSentHistory.get(targetUuid) || 0;
-                // 1000ミリ秒(1秒)未満の連投ならスキップ
-                if (now - lastSent < 1000) {
-                    console.log(`⚠️ ${data.type} 重複のため無視しました`);
-                    return;
-                }
-                const dhmsg = dhs(event, name, room, storedUuid, rand);
-                if (dhmsg) {
-                    wss.send(JSON.stringify(dhmsg));
-                    console.log("自分のDHを送信完了");
-                    // ★追加：送信時刻をメモする
-                    dhSentHistory.set(targetUuid, now);
-                }
+            else {
+                wss.onopen = () => {
+                    console.log("🚀 Connection opened, sending JOIN");
+                    wss.send(joinMsg);
+                };
             }
-            else if (data.type === "DH" && data.name !== name) {
-                try {
-                    // ★awaitを追加
-                    const keys = await restoreKey(localStorage.getItem("pin") || "");
-                    // 1. まずViewから相手のプロフィールを取得
-                    const peerData = await testPublicKeyFetch(data.uuid);
-                    if (peerData && peerData.x25519_pub) {
-                        // 2. その中の「x25519_pub」という文字列だけをバイナリ（Uint8Array）に変換
-                        const peerRawPubKey = await base64ToUint8Array(peerData.x25519_pub);
-                        // 3. インポートして鍵オブジェクトにする（これがさっきの「儀式」）
-                        const theirPublicKey = await window.crypto.subtle.importKey("raw", peerRawPubKey, {
-                            name: "X25519"
-                        }, true, []);
-                        // 4. これでようやく「合体」！
-                        aeskey = await deriveSharedKey(keys.xPriv, theirPublicKey);
-                        console.log("✨ 共通鍵の合体に成功！");
+            // ▼ メッセージ受信時の処理（暗号化・復号ロジック）
+            // ▼ WebSocketでメッセージを受け取ったときの全処理
+            wss.onmessage = async (event) => {
+                const data = JSON.parse(event.data);
+                // ------------------------------------------------
+                // 📜 A. 履歴 (History) の受信
+                // ------------------------------------------------
+                if (data.type === "history") {
+                    console.log(`📜 履歴を受信: ${data.messages.length}件`);
+                    // 配列をループして、1つずつ処理関数に投げる
+                    for (const msg of data.messages) {
+                        await handleIncomingMessage(msg);
                     }
-                    console.log("✨✨ AES鍵が完成しました！");
-                    console.log("AES鍵 base64:", await arrayBufferToBase64(await crypto.subtle.exportKey("raw", aeskey)));
-                    const aes = await aesKeyToArray(aeskey);
-                    console.log("AES鍵 Uint8Array:", aes);
-                    const peerRand = new Uint8Array(Object.values(data.rand));
-                    const myUuid = storedUuid;
-                    const peerUuid = data.uuid;
-                    // UUIDを比較して、順番を常に一定にする（アルファベット順など）
-                    let firstRand, secondRand;
-                    if (myUuid < peerUuid) {
-                        firstRand = rand; // 自分が先
-                        secondRand = peerRand; // 相手が後
-                    }
-                    else {
-                        firstRand = peerRand; // 相手が先
-                        secondRand = rand; // 自分が後
-                    }
-                    try {
-                        const { data: datarand, error } = await supabase
-                            .from('friend_sessions')
-                            .select('hash')
-                            .eq('he_uuid', peerUuid)
-                            .eq('uuid', storedUuid)
-                            .maybeSingle();
-                        if (!datarand.hash) {
-                            // 【行がない場合】
-                            console.log("この相手とは初対面だ。新しくDHして乱数を作るぞ。");
-                            const hash = combine(await sha512(firstRand), await sha512(secondRand));
-                            aesKeyhash = await deriveAesKeySafe(await sha256(await sha512(combine(await sha512(hash), await sha512(aes)))));
-                            const hashb64 = await arrayBufferToBase64(hash);
-                            const { error } = await supabase
-                                .from('friend_sessions') // 書き込み先のテーブル名
-                                .insert([
-                                {
-                                    he_uuid: peerUuid, // ここにペアの文字列
-                                    hash: hashb64, // ここに乱数
-                                    uuid: storedUuid // 自分のUUID
-                                }
-                            ]);
-                            if (error) {
-                                console.error("書き込みエラー:", error.message);
-                            }
-                            else {
-                                console.log("いいゾォ、行の追加に成功した！");
-                            }
-                            // ここで新しい乱数を生成し、あとで insert (upsert) するフローへ
-                        }
-                        else {
-                            // 【行がある場合】
-                            // data[0].hashed_rand を使って鍵を復元！
-                            const hash = await base64ToUint8Array(datarand.hash);
-                            aesKeyhash = await deriveAesKeySafe(await sha256(await sha512(combine(await sha512(hash), await sha512(aes)))));
-                        }
-                        // 行（データ）を追加して書き込む
-                        console.log(" AES鍵ハッシュが完成しました！");
-                    }
-                    catch (e) {
-                        console.error("鍵交換エラー:", e);
-                    }
-                    console.log("🔑 鍵交換プロセス完了");
-                    addSystemMsg("メッセージを送信できます");
                 }
-                catch (e) {
-                    console.error("DH処理エラー:", e);
-                }
-                // wss.onmessage の中の data.type === "message" の部分
-            }
-            else if (data.type === "message" && data.name !== name) {
-                try {
-                    if (!aesKeyhash)
+                // ------------------------------------------------
+                // 📩 B. リアルタイムメッセージ の受信
+                // ------------------------------------------------
+                else if (data.type === "message") {
+                    // ★重要: リアルタイムの場合、自分のメッセージは「送信ボタン」を押した瞬間に
+                    // 画面に出ているはずなので、ここでは無視して重複を防ぐ
+                    if (data.uuid === storedUuid)
                         return;
-                    const [iv, encryptedContent] = await Promise.all([
-                        base64ToUint8Array(data.iv),
-                        base64ToUint8Array(data.data)
-                    ]);
-                    const decryptedBuffer = await decrypt(aesKeyhash, iv, encryptedContent.buffer);
-                    // ★修正1：データを確実にコピーしてバイナリとして安定させる
+                    // 相手からのメッセージなら処理する
+                    await handleIncomingMessage(data);
+                }
+                // ------------------------------------------------
+                // 🔑 C. システム・鍵交換メッセージ (既存維持)
+                // ------------------------------------------------
+                else if (data.type === "join-ack")
+                    addSystemMsg("参加しました");
+                else if (data.type === "join-nack")
+                    addSystemMsg("エラー: 参加できませんでした");
+                else if (data.type === "quit-broadcast" || data.type === "leave") {
+                    addSystemMsg(`${data.name || '相手'} が退出しました`);
+                }
+                else if (data.type === "join-broadcast") {
+                    addSystemMsg(`${data.name || '誰か'} が参加しました`);
+                }
+                // DH鍵交換の処理などはここに続く...
+            };
+            // ▼▼▼ 【核心部分】復号と subType 振り分けを行う関数 ▼▼▼
+            async function handleIncomingMessage(msg) {
+                // 鍵がないと復号できないのでガード
+                if (!aesKeyhash)
+                    return;
+                try {
+                    // 1. Base64文字列をバイナリ(Uint8Array)に戻す
+                    // (サーバーからは iv と data が Base64 で送られてくるため)
+                    const iv = await base64ToUint8Array(msg.iv);
+                    const encryptedData = await base64ToUint8Array(msg.data);
+                    // 2. 復号実行 (AES-GCM)
+                    const decryptedBuffer = await window.crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, aesKeyhash, // グローバル変数の共通鍵
+                    encryptedData);
+                    // 3. 復号された生データ (Uint8Array)
                     const cleanData = new Uint8Array(decryptedBuffer);
-                    if (data.subType === "image" || data.subType === "file" || data.subType === "audio") {
-                        // ★修正2：MIMEタイプを動的に判定
-                        // 届いた data.mimeType を優先し、なければ拡張子から推測
-                        let mime = data.mimeType;
-                        if (!mime) {
-                            if (data.fileName.toLowerCase().endsWith(".jpg") || data.fileName.toLowerCase().endsWith(".jpeg")) {
-                                mime = "image/jpeg";
-                            }
-                            else if (data.fileName.toLowerCase().endsWith(".png")) {
-                                mime = "image/png";
-                            }
-                            else if (data.subType === "image") {
-                                mime = "image/jpeg"; // デフォルト
-                            }
-                            else {
-                                mime = "application/octet-stream";
-                            }
-                        }
-                        const blob = new Blob([cleanData], {
-                            type: mime
-                        });
-                        const url = URL.createObjectURL(blob);
-                        console.log(`[成功] 表示中: ${data.originalName} (MIME: ${mime})`);
-                        // 表示の床へ
-                        addMediaBubble(url, data.fileName, data.originalName, false, data.subType);
+                    // 4. 「これは自分か？」を判定 (履歴表示のときに重要)
+                    // storedUuid は自分のUUIDが入っている変数
+                    const isMe = (msg.uuid === storedUuid);
+                    // 5. ★ subType に応じて処理を分岐 ★
+                    // --- テキストの場合 ---
+                    if (msg.subType === "text") {
+                        const text = new TextDecoder().decode(cleanData);
+                        // マインさんが作った addBubble を呼び出す
+                        addBubble(text, isMe);
                     }
-                    else {
-                        const messageText = new TextDecoder().decode(cleanData);
-                        addBubble(messageText, false);
+                    // --- メディア（画像・音声・ファイル）の場合 ---
+                    else if (["image", "file", "audio"].includes(msg.subType)) {
+                        // MIMEタイプの決定（msg.mimeTypeがあれば優先、なければ拡張子から推測）
+                        let mime = msg.mimeType || "application/octet-stream";
+                        if (!msg.mimeType && msg.fileName) {
+                            const lowerName = msg.fileName.toLowerCase();
+                            if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg"))
+                                mime = "image/jpeg";
+                            else if (lowerName.endsWith(".png"))
+                                mime = "image/png";
+                            else if (lowerName.endsWith(".gif"))
+                                mime = "image/gif";
+                            else if (lowerName.endsWith(".mp3"))
+                                mime = "audio/mpeg";
+                            else if (lowerName.endsWith(".wav"))
+                                mime = "audio/wav";
+                            else if (lowerName.endsWith(".mp4"))
+                                mime = "video/mp4";
+                            else if (lowerName.endsWith(".pdf"))
+                                mime = "application/pdf";
+                        }
+                        // バイナリからBlobを作成
+                        const blob = new Blob([cleanData], { type: mime });
+                        const url = URL.createObjectURL(blob);
+                        // マインさんが作った addMediaBubble を呼び出す
+                        addMediaBubble(url, msg.name || "Unknown", msg.originalName || msg.fileName || "file", isMe, msg.subType // ここで subType を渡すことで addMediaBubble 内で分岐される
+                        );
                     }
                 }
                 catch (e) {
-                    console.error("復号・表示に失敗しました:", e);
+                    console.error("復号失敗:", e);
+                    // 必要ならエラー表示
+                    // addSystemMsg("🔒 メッセージの復号に失敗しました");
                 }
             }
-        };
+            // --- 必須: Base64変換ヘルパー (もし無ければ追加) ---
+            function base64ToUint8Array(base64) {
+                const binary_string = window.atob(base64);
+                const len = binary_string.length;
+                const bytes = new Uint8Array(len);
+                for (let i = 0; i < len; i++) {
+                    bytes[i] = binary_string.charCodeAt(i);
+                }
+                return bytes;
+            }
+        }
+        catch (err) {
+            // エラー時の処理 (検索失敗など)
+            alert(err.message);
+            btnroom.textContent = originalBtnText; // ボタンの文字を戻す
+            btnroom.disabled = false; // ボタンをまた押せるようにする
+        }
     });
     if (localStorage.getItem("pin") === null || localStorage.getItem("pin") === "") {
         enemyencyWipeBtn.style.display = "none";

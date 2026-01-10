@@ -10,12 +10,6 @@
  */
 
 
-import {
-    createClient
-    // @ts-ignore
-} from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm'
-
-
 
 export async function deriveAesKeySafe(rawSeed: Uint8Array): Promise<CryptoKey> {
   return await crypto.subtle.importKey(
@@ -30,18 +24,8 @@ export async function deriveAesKeySafe(rawSeed: Uint8Array): Promise<CryptoKey> 
     // 2. HKDFを使って最終的なAES-GCM鍵を導出
 
             
-   export    async function testPublicKeyFetch(targetUuid: string): Promise < any > {
+   export    async function PublicKeyFetch(targetUuid: string,supabase): Promise < any > {
         console.log("🛠️ 実験開始: 窓口(View)からデータ取得を試みます...");
-    const supabase = createClient(
-        'https://cedpfdoanarzyxcroymc.supabase.co',
-        'sb_publishable_E5jwgv5t2ONFKg3yFENQmw_lVUSFn4i', {
-            global: {
-                headers: {
-                    Authorization: `Bearer ${localStorage.getItem("my_token")}`,
-                },
-            },
-        }
-    );
         
         const {
             data,

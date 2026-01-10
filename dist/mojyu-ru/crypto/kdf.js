@@ -8,23 +8,13 @@
  *
  *
  */
-import { createClient
-// @ts-ignore
- } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 export async function deriveAesKeySafe(rawSeed) {
     return await crypto.subtle.importKey("raw", rawSeed, { name: "AES-GCM" }, true, // ← ここを true にすれば、後で exportKey が使えるようになります！
     ["encrypt", "decrypt"]);
 }
 // 2. HKDFを使って最終的なAES-GCM鍵を導出
-export async function testPublicKeyFetch(targetUuid) {
+export async function PublicKeyFetch(targetUuid, supabase) {
     console.log("🛠️ 実験開始: 窓口(View)からデータ取得を試みます...");
-    const supabase = createClient('https://cedpfdoanarzyxcroymc.supabase.co', 'sb_publishable_E5jwgv5t2ONFKg3yFENQmw_lVUSFn4i', {
-        global: {
-            headers: {
-                Authorization: `Bearer ${localStorage.getItem("my_token")}`,
-            },
-        },
-    });
     const { data, error } = await supabase
         .from('public_profiles') // 👈 さっき作った View の名前
         .select('*') // 👈 あえて「全部」リクエストしてみる
