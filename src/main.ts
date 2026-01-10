@@ -204,7 +204,7 @@ async function main() {
 
             aesKeyhash = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
             console.log("🗝️ 共通鍵の生成完了");
-            addSystemMsg("暗号化通信が確立しました");
+            addSystemMsg("送信準備完了");
 
             // 画面切り替え
             roomSelection.style.display = "none";

@@ -174,7 +174,7 @@ async function main() {
             const theirPublicKey = await window.crypto.subtle.importKey("raw", theirRawKey.buffer, { name: "X25519" }, true, []);
             aesKeyhash = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
             console.log("🗝️ 共通鍵の生成完了");
-            addSystemMsg("暗号化通信が確立しました");
+            addSystemMsg("送信準備完了");
             // 画面切り替え
             roomSelection.style.display = "none";
             chatContainer.style.display = "flex";
