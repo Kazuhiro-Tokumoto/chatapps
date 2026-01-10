@@ -3,7 +3,7 @@ import { generateEd25519KeyPair, generateX25519KeyPair } from "./mojyu-ru/crypto
 import { arrayBufferToBase64, base64ToUint8Array } from "./mojyu-ru/base64.js"; // 16進数変換のみ残す
 import { generateSalt, generateMasterSeed } from "./mojyu-ru/crypto/saltaes.js";
 import { PublicKeyFetch } from "./mojyu-ru/crypto/kdf.js";
-import { encrypt, deriveKeyFromPin } from "./mojyu-ru/crypto/aes.js";
+import { encrypt, deriveKeyFromPin, deriveSharedKey } from "./mojyu-ru/crypto/aes.js";
 // @supabase/supabase-js ではなく、URLを直接指定する
 // @ts-ignore
 import { createClient
@@ -592,7 +592,6 @@ async function main() {
     // ▼▼▼ ここからスタート ▼▼▼
     // ★ async を追加（これで await が使えます）
     btnroom.addEventListener("click", async () => {
-        // 1. 入力チェック
         const inputVal = inputroom.value.trim();
         if (!inputVal || inputVal.length < 8 || inputVal.length > 64) {
             alert("有効なUUIDを入力してください（8〜64文字）");
@@ -602,9 +601,35 @@ async function main() {
         const originalBtnText = btnroom.textContent;
         btnroom.textContent = "検索中...";
         btnroom.disabled = true;
+        const targetProfile = await PublicKeyFetch(inputVal, supabase);
+        if (!targetProfile) {
+            throw new Error("ユーザーが見つかりません。");
+        }
+        console.log("✅ 相手が見つかりました:", targetProfile.username);
+        // ▼▼▼ 【ここに追加】見つけた瞬間に、鍵を合体させる！ ▼▼▼
         try {
-            // 3. ★データベースから相手を探す（一番大事な部分！）
-            // (PublicKeyFetch関数を使って、名前と鍵を取りに行きます)
+            // 1. まず「自分の鍵」を用意する (PINは保存されている前提)
+            const pin = localStorage.getItem("pin");
+            if (!pin)
+                throw new Error("PINコードが見つかりません。再ログインしてください。");
+            // 自分の鍵ペア（xPriv）を復元
+            const myKeys = await restoreKey(pin);
+            // 2. 「相手の鍵」を使える形にする
+            // targetProfile.x25519_pub (Base64) → Uint8Array → CryptoKey
+            const theirRawKey = await base64ToUint8Array(targetProfile.x25519_pub);
+            const theirPublicKey = await window.crypto.subtle.importKey("raw", theirRawKey.buffer, { name: "X25519" }, true, []);
+            // 3. ★合体！共通鍵 (aesKeyhash) を生成
+            aesKeyhash = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
+            console.log("🗝️ 共通鍵の生成完了！これで送信できます。");
+            addSystemMsg("暗号化通信が確立しました");
+        }
+        catch (e) {
+            console.error("鍵生成エラー:", e);
+            alert("鍵の生成に失敗しました: " + e.message);
+            return; // 鍵が作れなかったらチャットに入れない
+        }
+        // 1. 入力チェック
+        try {
             const targetProfile = await PublicKeyFetch(inputVal, supabase);
             if (!targetProfile) {
                 throw new Error("ユーザーが見つかりません。UUIDが正しいか確認してください。");
@@ -615,9 +640,6 @@ async function main() {
             chatContainer.style.display = "flex";
             // ★ヘッダーに「相手の名前」を表示！
             chatHeader.textContent = `相手: ${targetProfile.username}`;
-            // ============================================================
-            //  ここから下は WebSocket通信ロジック (マインさんのコード統合版)
-            // ============================================================
             const joinMsg = JSON.stringify({
                 type: "join",
                 name: name, // 自分の名前 (グローバル変数)
