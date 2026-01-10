@@ -980,14 +980,21 @@ try{
     }
 
 
-    wss.onclose = () => {
-    const url = new URL(window.location.href);
-    if (room) url.searchParams.set('room', room); // 部屋名をURLに残す
-    window.history.replaceState(null, '', url.toString());
+        wss.onclose = () => {
+            // 1. 今のURLを取得して解析
+            const url = new URL(window.location.href);
 
-    setTimeout(() => location.reload(), 1000); // 1秒後にリロード
-    };
+            // 2. roomパラメータを「上書き」する（これなら増殖しない）
+            if (room) {
+                url.searchParams.set('room', room); 
+            }
 
-}
+            // 3. ブラウザの履歴を「綺麗に上書きされたURL」で更新
+            window.history.replaceState(null, '', url.toString());
+
+            // 4. 1秒後にリロード
+            setTimeout(() => location.reload(), 1000);
+        };
+    }
 
 main();
