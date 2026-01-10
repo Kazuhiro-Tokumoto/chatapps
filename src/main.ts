@@ -303,13 +303,22 @@ async function main() {
             }
         }
 
+ if (!aesKeyhash && msg.uuid !== storedUuid) {
+             // (省略: 上記の自動生成コードと同じ)
+             // ここは変更しなくてOKです
+        }
+
         if (!aesKeyhash) return;
 
         try {
             const iv = await base64ToUint8Array(msg.iv);
             const encryptedData = await base64ToUint8Array(msg.data);
+            
+            // ★型エラー回避 (.buffer as ArrayBuffer)
             const decryptedBuffer = await window.crypto.subtle.decrypt(
-                { name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, aesKeyhash, encryptedData.buffer as ArrayBuffer
+                { name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, 
+                aesKeyhash, 
+                encryptedData.buffer as ArrayBuffer
             );
             const cleanData = new Uint8Array(decryptedBuffer);
             const isMe = (msg.uuid === storedUuid);
@@ -319,7 +328,11 @@ async function main() {
             } else {
                 let mime = msg.mimeType || "application/octet-stream";
                 const blob = new Blob([cleanData], { type: mime });
-                addMediaBubble(URL.createObjectURL(blob), msg.name, msg.originalName || msg.fileName, isMe, msg.subType);
+                
+                // ★修正: 第3引数(originalName)が空っぽなら "file" という名前にする
+                const fileName = msg.originalName || msg.fileName || "file";
+                
+                addMediaBubble(URL.createObjectURL(blob), msg.name, fileName, isMe, msg.subType);
             }
         } catch (e) {
             console.error("復号失敗:", e);
@@ -385,11 +398,14 @@ async function main() {
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    function addMediaBubble(url: string, uuidName: string, originalName: string, isMe: boolean, subType: any) {
+function addMediaBubble(url: string, uuidName: string, originalName: string, isMe: boolean, subType: any) {
         const container = document.createElement("div");
         container.style.cssText = `max-width: 70%; margin: 10px 0; padding: 8px; align-self: ${isMe ? "flex-end" : "flex-start"}; display: flex; flex-direction: column; gap: 6px; background: ${isMe ? "#0084ff" : "#e4e6eb"}; border-radius: 15px; ${isMe ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;"}`;
 
-        const lower = originalName.toLowerCase();
+        // ★修正: originalName が undefined や null でも落ちないようにする
+        const safeName = originalName || "unknown_file";
+        const lower = safeName.toLowerCase();
+
         const isVideo = lower.endsWith(".mp4") || lower.endsWith(".mov");
         const isAudio = subType === "audio" || lower.endsWith(".mp3");
 
@@ -413,8 +429,11 @@ async function main() {
         }
 
         const link = document.createElement("a");
-        link.href = url; link.download = originalName; link.textContent = `📥 ${originalName}`;
+        link.href = url; 
+        link.download = safeName; // ★ここも safeName を使う
+        link.textContent = `📥 ${safeName}`;
         link.style.cssText = `font-size: 12px; color: ${isMe ? "rgba(255,255,255,0.9)" : "#0084ff"}; text-decoration: none; font-weight: bold; display: block; margin-top: 4px;`;
+        
         container.appendChild(link);
         chatBox.appendChild(container);
         chatBox.scrollTop = chatBox.scrollHeight;
