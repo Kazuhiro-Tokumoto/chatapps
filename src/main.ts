@@ -655,6 +655,12 @@ function addBubble(text: string, isMe: boolean) {
     let keys: any;
     let rand: Uint8Array = crypto.getRandomValues(new Uint8Array(32));
     const dhSentHistory = new Map<string, number>();
+    const params = new URLSearchParams(window.location.search);
+    const autoRoom = params.get('room');
+    if (autoRoom) {
+        inputroom.value = autoRoom; // 入力欄を埋める
+    }
+
 
     // DB用のパスワードとなんか、　まぁええやろ
     const supabase = createClient(
@@ -970,9 +976,18 @@ try{
     } else {
         pinContainer.style.display = "none";
         enemyencyWipeBtn.style.display = "flex";
+        roomSelection.style.display = "flex";
     }
 
-}
 
+    wss.onclose = () => {
+    const url = new URL(window.location.href);
+    if (room) url.searchParams.set('room', room); // 部屋名をURLに残す
+    window.history.replaceState(null, '', url.toString());
+
+    setTimeout(() => location.reload(), 1000); // 1秒後にリロード
+    };
+
+}
 
 main();
