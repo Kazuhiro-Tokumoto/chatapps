@@ -766,12 +766,22 @@ btnroom.addEventListener("click", async () => {
     btnroom.disabled = true;
 
     const targetProfile = await PublicKeyFetch(inputVal, supabase);
+        // ... (省略) ...
+        console.log("✅ 相手が見つかりました:", targetProfile.username);
+
+
+        // ▼▼▼ 【超重要】ここを必ず追加！！！ ▼▼▼
+        
+        // グローバル変数の room に、相手のUUIDをセットする
+        room = targetProfile.uuid; 
+        
+        console.log("🎯 宛先(room)をセットしました:", room);
 
         if (!targetProfile) {
             throw new Error("ユーザーが見つかりません。");
         }
+        
 
-        console.log("✅ 相手が見つかりました:", targetProfile.username);
 
         // ▼▼▼ 【ここに追加】見つけた瞬間に、鍵を合体させる！ ▼▼▼
         

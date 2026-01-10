@@ -30,7 +30,23 @@ const db = mysql.createPool({
 });
 
 console.log("🗄️  [DB] MariaDB (2TB SSD Storage) Connected.");
+function broadcastToRoom(targetUuid, data) {
+    if (!targetUuid) {
+        console.error("⚠️ 転送先(room/uuid)が指定されていません");
+        return;
+    }
 
+    // connectedUsers (Map) から相手のWebSocketを探す
+    const targetWs = connectedUsers.get(targetUuid);
+
+    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+        targetWs.send(JSON.stringify(data));
+        console.log(`📡 転送成功: -> ${targetUuid}`);
+    } else {
+        console.log(`📴 相手(${targetUuid})は現在オフラインです`);
+        // 必要ならここで「未読通知」などをDBに入れる処理をする
+    }
+}
 // --- ここまで ---
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -183,63 +199,50 @@ wss.on("connection", (ws) => {
     ws.isAlive = true;
   });
 
-ws.on("message", async (data) => { // async を追加して DB 保存を待てるようにする
-    let msg;
-    try {
-      msg = JSON.parse(data.toString());
-    } catch (e) {
-      console.error("JSON Parse Error:", e);
-      return;
-    }
+// ▼ サーバー側のコードです
 
-    switch (msg.type) {
-      case "join":
-        handleJoin(ws, msg);
-        break;
-      
-case "message": {  // ← ★ここに開始の波括弧を追加！
-        if (!ws.authenticated) {
-          console.warn("⚠️ 未認証ブロック");
-          return;
-        }
-        if (!msg.to) return;
+ws.on('message', async (rawMessage) => {
+    const data = JSON.parse(rawMessage);
 
-        // デフォルトは 'text'
-        const subtype = msg.subtype || 'text';
+    // ... (join などの処理) ...
 
-        // SSD保存
+    // ▼▼▼ ここを確認・追加してください ▼▼▼
+// ws.on('message', ...) の中の if (data.type === "message") 部分
+
+    if (data.type === "message") {
+        console.log(`📩 メッセージ受信: ${data.name} -> To: ${data.room}`);
+
+        // 1. ★ここでさっきの関数を呼び出す！
+        broadcastToRoom(data.room, data); 
+
+        // 2. データベースに保存
         try {
-          await db.execute(
-            'INSERT INTO encrypted_messages (to_uuid, from_uuid, iv, data, subtype) VALUES (?, ?, ?, ?, ?)',
-            [msg.to, ws.uuid, Buffer.from(msg.iv, 'base64'), msg.data, subtype]
-          );
-          console.log(`💾 [SSD Saved] ${ws.uuid} -> ${msg.to} (${subtype})`);
-        } catch (e) {
-          console.error("🚨 DB保存エラー:", e);
-        }
+            // Room(宛先)がないとDB保存も失敗するのでチェック
+            const toUuid = data.room; 
+            if (!toUuid) throw new Error("宛先(room)が undefined です");
 
-        // 転送処理
-        // ★ここで const targetWs を宣言しても、{ }の中なら怒られない！
-        const targetWs = connectedUsers.get(msg.to);
-        if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-          send(targetWs, {
-            type: "message",
-            from: ws.uuid,
-            iv: msg.iv,
-            data: msg.data,
-            subtype: subtype,
-            time: new Date().toISOString()
-          });
-          console.log(`📡 [Relay] ${ws.uuid} -> ${msg.to} (Direct)`);
-        }
-        break;
-      } // ← ★ここに閉じの波括弧を追加！
+            const ivBuffer = Buffer.from(data.iv, 'base64');
+            const dataBuffer = Buffer.from(data.data, 'base64');
 
-      case "leave":
-        handleLeave(ws);
-        break;
+            await db.execute(
+                `INSERT INTO encrypted_messages 
+                (from_uuid, to_uuid, iv, data, subtype, time) 
+                VALUES (?, ?, ?, ?, ?, NOW())`,
+                [
+                    data.uuid,      // 送信者
+                    toUuid,         // 宛先 (data.room)
+                    ivBuffer, 
+                    dataBuffer, 
+                    data.subType || 'text'
+                ]
+            );
+            console.log("💾 DB保存成功！");
+
+        } catch (err) {
+            console.error("🚨 DB保存失敗:", err.message);
+        }
     }
-  });
+});
 
   ws.on("close", () => {
     handleLeave(ws);
