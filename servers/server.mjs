@@ -155,15 +155,21 @@ async function handleJoin(ws, msg) {
 
     rows.reverse(); // 古い順に戻す
 
-    send(ws, { 
+send(ws, { 
       type: "history", 
       messages: rows.map(r => ({
-        type: "message",             // クライアントの形式に合わせる
-        uuid: r.from_uuid,           // ★修正2: クライアントは "uuid" を見て左右判定しています
-        name: r.from_uuid === uuid ? name : "相手", // (名前はDBになければ簡易的でOK)
+        type: "message",
+        uuid: r.from_uuid,
+        name: r.from_uuid === uuid ? name : "相手",
         
-        iv: r.iv.toString('base64'), 
-        data: r.data.toString('base64'), // ★修正3: 本文も必ずBase64文字列にする！(Bufferのままだと死にます)
+        // ▼▼▼ 【ここを修正！】 ▼▼▼
+        // DBにはすでに文字(Base64)で入っているので、.toString('base64') は禁止！
+        // ただの .toString() にしてください。
+        
+        iv: r.iv.toString(),     // ❌ .toString('base64') -> ⭕ .toString()
+        data: r.data.toString(), // ❌ .toString('base64') -> ⭕ .toString()
+        
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         
         subType: r.subtype,
         time: r.time
@@ -202,42 +208,45 @@ wss.on("connection", (ws) => {
 // ▼ サーバー側のコードです
 
 ws.on('message', async (rawMessage) => {
-    const data = JSON.parse(rawMessage);
+    // データを受信
+    let data;
+    try {
+        data = JSON.parse(rawMessage);
+    } catch (e) {
+        return console.error("JSON parse error");
+    }
 
-    // ... (join などの処理) ...
+    // ▼▼▼ 【ここが抜けていました！】 ▼▼▼
+    // クライアントから "join" が来たら、handleJoin関数を実行する
+    if (data.type === "join") {
+        await handleJoin(ws, data);
+        return; 
+    }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-    // ▼▼▼ ここを確認・追加してください ▼▼▼
-// ws.on('message', ...) の中の if (data.type === "message") 部分
-
+    // メッセージ受信処理
     if (data.type === "message") {
         console.log(`📩 メッセージ受信: ${data.name} -> To: ${data.room}`);
-
-        // 1. ★ここでさっきの関数を呼び出す！
+        
         broadcastToRoom(data.room, data); 
 
-        // 2. データベースに保存
         try {
-            // Room(宛先)がないとDB保存も失敗するのでチェック
             const toUuid = data.room; 
             if (!toUuid) throw new Error("宛先(room)が undefined です");
-
-            const ivBuffer = Buffer.from(data.iv, 'base64');
-            const dataBuffer = Buffer.from(data.data, 'base64');
 
             await db.execute(
                 `INSERT INTO encrypted_messages 
                 (from_uuid, to_uuid, iv, data, subtype, time) 
                 VALUES (?, ?, ?, ?, ?, NOW())`,
                 [
-                    data.uuid,      // 送信者
-                    toUuid,         // 宛先 (data.room)
-                    ivBuffer, 
-                    dataBuffer, 
+                    data.uuid,      
+                    toUuid,         
+                    data.iv,   // Base64文字のまま
+                    data.data, // Base64文字のまま
                     data.subType || 'text'
                 ]
             );
             console.log("💾 DB保存成功！");
-
         } catch (err) {
             console.error("🚨 DB保存失敗:", err.message);
         }
