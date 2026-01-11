@@ -17,11 +17,10 @@ async function main() {
     const storedToken = localStorage.getItem("my_token") ?? "";
     const storedUuid = localStorage.getItem("my_uuid") ?? "";
     const wss: WebSocket = new WebSocket("wss://mail.shudo-physics.com/");
+    let room: string;
+    let aesKeyhash: CryptoKey | null = null;
     
-    let room: string; 
-    const aesKeyCache = new Map<string, CryptoKey>(); 
-    const friendNames = new Map<string, string>(); 
-
+    // Supabase初期化
     const supabase = createClient(
         'https://cedpfdoanarzyxcroymc.supabase.co',
         'sb_publishable_E5jwgv5t2ONFKg3yFENQmw_lVUSFn4i', {
@@ -29,7 +28,7 @@ async function main() {
         }
     );
 
-    if (!storedToken || !storedUuid) {
+    if (storedToken === "" || storedUuid === "" || !storedToken || !storedUuid) {
         window.location.href = "../index.html";
         return;
     }
@@ -38,7 +37,7 @@ async function main() {
     const autoRoom = params.get('room');
 
     // --- DOM作成 ---
-    document.body.style.cssText = "margin: 0; padding: 0; background-color: #f0f2f5; font-family: sans-serif; overflow: hidden;";
+    document.body.style.cssText = "margin: 0; padding: 0; background-color: #f0f2f5; font-family: sans-serif;";
     
     // 検索画面
     const roomSelection = document.createElement("div");
@@ -57,180 +56,510 @@ async function main() {
     roomSelection.append(roomCard);
     document.body.appendChild(roomSelection);
 
-    // チャットメインコンテナ
+    // チャット画面
     const chatContainer = document.createElement("div");
-    chatContainer.style.cssText = "display: none; height: 100vh; width: 100vw; flex-direction: row;";
-
-    // サイドバー (トーク一覧)
-    const sidebar = document.createElement("div");
-    sidebar.style.cssText = "width: 280px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; flex-shrink: 0;";
-    const sidebarHeader = document.createElement("div");
-    sidebarHeader.textContent = "トーク一覧";
-    sidebarHeader.style.cssText = "padding: 20px; font-weight: bold; font-size: 18px; border-bottom: 1px solid #eee; background: #fff;";
-    const friendListContainer = document.createElement("div");
-    friendListContainer.style.cssText = "flex: 1; overflow-y: auto;";
-    sidebar.append(sidebarHeader, friendListContainer);
-
-    // メインチャットエリア
-    const mainChat = document.createElement("div");
-    mainChat.style.cssText = "flex: 1; display: flex; flex-direction: column; position: relative; background: #f9f9f9;";
+    chatContainer.style.cssText = "display: none; height: 100vh; flex-direction: column;";
     const chatHeader = document.createElement("div");
-    chatHeader.style.cssText = "padding: 15px; background: white; border-bottom: 1px solid #ddd; text-align: center; font-weight: bold; position: relative;";
+    chatHeader.style.cssText = "padding: 15px; background: white; border-bottom: 1px solid #ddd; text-align: center; font-weight: bold;";
     const chatBox = document.createElement("div");
+    chatBox.id = "chatBox";
     chatBox.style.cssText = "flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 8px;";
+    
     const inputContainer = document.createElement("div");
     inputContainer.style.cssText = "padding: 15px; background: white; display: flex; gap: 10px; border-top: 1px solid #ddd;";
-
+    
     const fileInput = document.createElement("input");
-    fileInput.type = "file"; fileInput.style.display = "none"; document.body.appendChild(fileInput);
-    const fileBtn = document.createElement("button"); fileBtn.textContent = "＋"; fileBtn.style.cssText = "background: none; border: none; font-size: 20px; cursor: pointer;";
-    const input = document.createElement("input"); input.placeholder = "メッセージを入力..."; input.style.cssText = "flex: 1; padding: 10px 15px; border-radius: 20px; border: none; background: #f0f2f5; outline: none;";
-    const sendBtn = document.createElement("button"); sendBtn.textContent = "送信"; sendBtn.style.cssText = "background: none; border: none; color: #0084ff; font-weight: bold; cursor: pointer;";
-
+    fileInput.type = "file";
+    fileInput.style.display = "none";
+    document.body.appendChild(fileInput);
+    const fileBtn = document.createElement("button");
+    fileBtn.textContent = "＋";
+    fileBtn.style.cssText = "background: none; border: none; font-size: 20px; cursor: pointer; padding: 5px;";
+    fileBtn.onclick = () => fileInput.click();
+    
+    const input = document.createElement("input");
+    input.placeholder = "Aa";
+    input.style.cssText = "flex: 1; padding: 10px 15px; border-radius: 20px; border: none; background: #f0f2f5; outline: none;";
+    const sendBtn = document.createElement("button");
+    sendBtn.textContent = "送信";
+    sendBtn.style.cssText = "background: none; border: none; color: #0084ff; font-weight: bold; cursor: pointer;";
+    
     inputContainer.append(fileBtn, input, sendBtn);
-    mainChat.append(chatHeader, chatBox, inputContainer);
-    chatContainer.append(sidebar, mainChat);
+    chatContainer.append(chatHeader, chatBox, inputContainer);
     document.body.appendChild(chatContainer);
 
+    // PIN画面
+    const pinContainer = document.createElement("div");
+    pinContainer.style.cssText = `position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 15px; background: white; padding: 30px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); z-index: 2000; width: 80%; max-width: 300px;`;
+    const pininput = document.createElement("input");
+    pininput.type = "password";
+    pininput.placeholder = "PIN(数字)";
+    pininput.inputMode = "numeric";
+    pininput.style.cssText = `width: 100%; padding: 12px; font-size: 18px; text-align: center; border-radius: 8px; border: 2px solid #ddd; outline: none;`;
+    const pinbtn = document.createElement("button");
+    pinbtn.textContent = "鍵を復元してチャット開始";
+    pinbtn.style.cssText = `width: 100%; padding: 15px; font-size: 16px; border-radius: 8px; border: none; background: #0084ff; color: white; font-weight: bold; cursor: pointer; box-shadow: 0 4px 10px rgba(0,132,255,0.3);`;
+    const wipeLink = document.createElement("span");
+    wipeLink.textContent = "データをすべて破棄";
+    wipeLink.style.cssText = "color: #ff4d4d; cursor: pointer; font-size: 12px; text-decoration: underline; margin-top: 10px;";
+    
+    pinContainer.appendChild(pininput);
+    pinContainer.appendChild(pinbtn);
+    pinContainer.appendChild(wipeLink);
+    document.body.appendChild(pinContainer);
+
+    const enemyencyWipeBtn = document.createElement("button");
+    enemyencyWipeBtn.textContent = "データ削除";
+    enemyencyWipeBtn.style.cssText = "position: fixed; top: 10px; left: 10px; padding: 8px 12px; border-radius: 8px; border: none; background: #ff4444; color: white; font-weight: bold; cursor: pointer; z-index: 1000;";
+    document.body.appendChild(enemyencyWipeBtn);
+
+    // 1. 自分の情報を取得
+    const myUuid = localStorage.getItem("my_uuid");
+    const myName = localStorage.getItem("my_name");
+
+    const baseUrl = "https://kazuhiro-tokumoto.github.io/chatapps/index.html";
+
+    // 2. ルームID（自分のUUID）をパラメータとして結合
+    const inviteUrl = `${baseUrl}?room=${storedUuid}`;
+
+    // 3. これをQRコードAPIに渡す
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(inviteUrl)}`;
+
+    console.log("確定招待URL:", inviteUrl);
+
+    // 4. UIに表示する (例: 設定ボタンを押した時に出す、またはサイドバーに置く)
+    const myInfoContainer = document.createElement("div");
+    myInfoContainer.style.cssText = "padding: 20px; background: white; border-radius: 12px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 10px;";
+
+    myInfoContainer.innerHTML = `
+        <h3 style="margin: 0 0 10px 0;">自分の連絡先</h3>
+        <p style="font-size: 12px; color: #666; word-break: break-all;">UUID: ${myUuid}</p>
+        <img src="${qrImageUrl}" alt="My QR Code" style="margin: 10px 0; border: 1px solid #eee; padding: 5px;">
+        <p style="font-size: 11px; color: #888;">このQRを相手にスキャンしてもらうと<br>直接チャットが始まります</p>
+        <button id="copy-link-btn" style="padding: 5px 10px; font-size: 12px; cursor: pointer;">招待リンクをコピー</button>
+    `;
+
+    document.body.appendChild(myInfoContainer);
+
+    // リンクのコピー機能も付けておくと便利！
+    document.getElementById('copy-link-btn').onclick = () => {
+        navigator.clipboard.writeText(inviteUrl);
+        alert("リンクをコピーしました！");
+    };
+
+
     // =================================================================
-    // 2. 補助関数 (リスト更新・UI系)
+    // 2. WebSocket イベント (★ここに移動させました！)
     // =================================================================
-    function renderFriendList() {
-        friendListContainer.innerHTML = "";
-        friendNames.forEach((fName, fUuid) => {
-            const item = document.createElement("div");
-            const isActive = room === fUuid;
-            item.style.cssText = `padding: 15px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; background: ${isActive ? "#e7f3ff" : "white"};`;
-            item.innerHTML = `
-                <div style="font-weight: bold; color: #333;">${fName}</div>
-                <div style="font-size: 11px; color: #999; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${fUuid}</div>
-            `;
-            item.onmouseover = () => { if(!isActive) item.style.backgroundColor = "#f5f5f5"; };
-            item.onmouseout = () => { if(!isActive) item.style.backgroundColor = "white"; };
-            item.onclick = () => {
-                room = fUuid;
-                chatHeader.textContent = `${fName}`;
-                chatBox.innerHTML = "";
-                renderFriendList();
-                addSystemMsg(`--- ${fName} とのチャット ---`);
-            };
-            friendListContainer.appendChild(item);
+    
+    // 接続時に JOIN を送る
+    wss.onopen = () => {
+        console.log("⚡ サーバーに接続成功！ログインを試みます...");
+        const joinPayload = {
+            type: "join",
+            name: name,
+            uuid: storedUuid,
+            token: storedToken
+        };
+        wss.send(JSON.stringify(joinPayload));
+    };
+
+    // メッセージ受信 (統合版)
+    wss.onmessage = async (event) => {
+        const data = JSON.parse(event.data);
+
+        // 📜 A. 履歴 (History)
+        if (data.type === "history") {
+            console.log(`📜 履歴を受信: ${data.messages.length}件`);
+            for (const msg of data.messages) {
+                await handleIncomingMessage(msg);
+            }
+        } 
+        // 📩 B. リアルタイムメッセージ
+        else if (data.type === "message") {
+            if (data.uuid === storedUuid) return; // 自分のメッセージは無視
+            await handleIncomingMessage(data);
+        } 
+        // 🔑 C. システム系
+        else if (data.type === "join-ack") {
+            addSystemMsg("参加しました");
+            console.log("✅ ログイン完了(join-ack)");
+        }
+        else if (data.type === "join-nack") addSystemMsg("エラー: 参加できませんでした");
+        else if (data.type === "quit-broadcast" || data.type === "leave") addSystemMsg(`${data.name || '相手'} が退出しました`);
+        else if (data.type === "join-broadcast") addSystemMsg(`${data.name || '誰か'} が参加しました`);
+    };
+
+    wss.onclose = () => {
+        console.log("connection closed");
+        const url = new URL(window.location.href);
+        if (room) url.searchParams.set('room', room); 
+        window.history.replaceState(null, '', url.toString());
+        setTimeout(() => location.reload(), 1000);
+    };
+
+    window.addEventListener("beforeunload", () => {
+        if (wss && wss.readyState === WebSocket.OPEN) {
+            wss.send(JSON.stringify({ type: "leave", name: name, uuid: storedUuid }));
+        }
+    });
+
+    // =================================================================
+    // 3. UIイベントリスナー
+    // =================================================================
+
+    // 検索ボタンクリック (ここをスッキリさせる)
+    btnroom.addEventListener("click", async () => {
+        const inputVal = inputroom.value.trim();
+        if (!inputVal || inputVal.length < 8) return alert("有効なUUIDを入力してください");
+
+        const originalBtnText = btnroom.textContent;
+        btnroom.textContent = "検索中...";
+        btnroom.disabled = true;
+
+        try {
+            const targetProfile = await PublicKeyFetch(inputVal, supabase);
+            if (!targetProfile) throw new Error("ユーザーが見つかりません。");
+
+            console.log("✅ 相手が見つかりました:", targetProfile.username);
+            room = targetProfile.uuid; // 宛先セット
+            console.log("🎯 宛先(room)をセットしました:", room);
+
+            // 鍵生成処理 (Search & Generate)
+            const pin = localStorage.getItem("pin");
+            if (!pin) throw new Error("PINコードが見つかりません");
+            
+            const myKeys = await restoreKey(pin);
+            const theirRawKey = await base64ToUint8Array(targetProfile.x25519_pub);
+            const theirPublicKey = await window.crypto.subtle.importKey(
+                "raw", theirRawKey.buffer as ArrayBuffer, { name: "X25519" }, true, []
+            );
+
+            aesKeyhash = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
+            console.log("🗝️ 共通鍵の生成完了");
+            addSystemMsg("送信準備完了");
+
+            // 画面切り替え
+            roomSelection.style.display = "none";
+            chatContainer.style.display = "flex";
+            chatHeader.textContent = `相手: ${targetProfile.username}`;
+
+        } catch (err: any) {
+            alert(err.message);
+            btnroom.textContent = originalBtnText;
+            btnroom.disabled = false;
+        }
+    });
+
+    // 送信処理
+    sendBtn.addEventListener("click", async () => {
+        if (input.value && aesKeyhash) {
+            await sendEncryptedMessage(input.value, aesKeyhash);
+            input.value = "";
+        }
+    });
+
+    input.addEventListener("keypress", async (e) => {
+        if (e.key === "Enter" && input.value && aesKeyhash) {
+            await sendEncryptedMessage(input.value, aesKeyhash);
+            input.value = "";
+        }
+    });
+
+    // ファイル選択処理
+    fileInput.onchange = (e) => handleFileSelect(e, "file");
+
+    // ドラッグ＆ドロップ処理
+    chatBox.addEventListener("dragover", (e) => {
+        e.preventDefault();
+        chatBox.style.backgroundColor = "rgba(0,132,255,0.1)";
+    });
+    chatBox.addEventListener("dragleave", () => chatBox.style.backgroundColor = "");
+    chatBox.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        chatBox.style.backgroundColor = "";
+        const files = e.dataTransfer?.files;
+        if (!files || !files.length) return;
+        const file = files[0];
+        let subType: "image" | "file" | "audio" = "file";
+        if (file.type.startsWith("image/") || file.type.startsWith("video/")) subType = "image";
+        if (file.type.startsWith("audio/")) subType = "audio";
+        await processFileAndSend(file, subType);
+    });
+
+    // PIN認証・ワイプ関連
+    wipeLink.onclick = emergencyWipe;
+    enemyencyWipeBtn.addEventListener("click", emergencyWipe);
+    pininput.addEventListener('input', () => { pininput.value = pininput.value.replace(/[^0-9]/g, ''); });
+    
+    // 初回/復帰のPIN画面制御
+    if (!localStorage.getItem("pin")) {
+        enemyencyWipeBtn.style.display = "none";
+        roomSelection.style.display = "none";
+        pinbtn.addEventListener("click", async () => {
+            pinContainer.style.display = "none";
+            enemyencyWipeBtn.style.display = "flex";
+            await restoreKey(pininput.value);
+            localStorage.setItem("pin", pininput.value);
+            roomSelection.style.display = "flex";
         });
+    } else {
+        pinContainer.style.display = "none";
+        roomSelection.style.display = "flex";
+    }
+
+    // =================================================================
+    // 4. 関数定義 (Helpers)
+    // =================================================================
+
+    // 共通の受信・復号処理 (自動鍵生成つき)
+    async function handleIncomingMessage(msg: any) {
+        if (!aesKeyhash && msg.uuid !== storedUuid) {
+            console.log("⚠️ 鍵生成を試みます...");
+            try {
+                const { data: userProfile } = await supabase.from('profile_users').select('x25519_pub').eq('uuid', msg.uuid).single();
+                if (!userProfile) throw new Error("Key not found");
+                
+                const pin = localStorage.getItem("pin");
+                if (!pin) throw new Error("PIN missing");
+
+                const myKeys = await restoreKey(pin);
+                const theirRawKey = await base64ToUint8Array(userProfile.x25519_pub);
+                const theirPublicKey = await window.crypto.subtle.importKey("raw", theirRawKey.buffer as ArrayBuffer, { name: "X25519" }, true, []);
+                
+                aesKeyhash = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
+                console.log("🗝️ 自動生成成功");
+                if (typeof room !== 'undefined') room = msg.uuid;
+            } catch (e) {
+                console.error("鍵生成失敗:", e);
+                return;
+            }
+        }
+
+ if (!aesKeyhash && msg.uuid !== storedUuid) {
+             // (省略: 上記の自動生成コードと同じ)
+             // ここは変更しなくてOKです
+        }
+
+        if (!aesKeyhash) return;
+
+        try {
+            const iv = await base64ToUint8Array(msg.iv);
+            const encryptedData = await base64ToUint8Array(msg.data);
+            
+            // ★型エラー回避 (.buffer as ArrayBuffer)
+            const decryptedBuffer = await window.crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, 
+                aesKeyhash, 
+                encryptedData.buffer as ArrayBuffer
+            );
+            const cleanData = new Uint8Array(decryptedBuffer);
+            const isMe = (msg.uuid === storedUuid);
+
+            if (msg.subType === "text") {
+                addBubble(new TextDecoder().decode(cleanData), isMe);
+            } else {
+                let mime = msg.mimeType || "application/octet-stream";
+                const blob = new Blob([cleanData], { type: mime });
+                
+                // ★修正: 第3引数(originalName)が空っぽなら "file" という名前にする
+                const fileName = msg.originalName || msg.fileName || "file";
+                
+                addMediaBubble(URL.createObjectURL(blob), msg.name, fileName, isMe, msg.subType);
+            }
+        } catch (e) {
+            console.error("復号失敗:", e);
+        }
+    }
+
+    async function sendEncryptedMessage(text: string, aeskey: CryptoKey) {
+        try {
+            const encrypted = await encrypt(aeskey, new TextEncoder().encode(text));
+            const [ivB64, dataB64] = await Promise.all([
+                arrayBufferToBase64(encrypted.iv), arrayBufferToBase64(encrypted.data)
+            ]);
+            wss.send(JSON.stringify({
+                type: "message", room: room, name: name, uuid: storedUuid,
+                iv: ivB64, data: dataB64, subType: "text"
+            }));
+            addBubble(text, true);
+        } catch (e) { console.error("送信失敗", e); }
+    }
+
+    async function processFileAndSend(file: File, subType: "image" | "file" | "audio") {
+        if (!aesKeyhash) return addSystemMsg("鍵がありません");
+        if (file.size > 15 * 1024 * 1024) return addSystemMsg("サイズ超過(15MBまで)");
+
+        try {
+            const encrypted = await encrypt(aesKeyhash, new Uint8Array(await file.arrayBuffer()));
+            const [ivB64, dataB64] = await Promise.all([
+                arrayBufferToBase64(encrypted.iv), arrayBufferToBase64(encrypted.data)
+            ]);
+            
+            let finalSubType = subType;
+            if (file.type.startsWith('audio/')) finalSubType = "audio";
+            if (file.type.startsWith('video/')) finalSubType = "image"; 
+
+            const uuidName = `${crypto.randomUUID()}.${file.name.split('.').pop()}`;
+
+            wss.send(JSON.stringify({
+                type: "message", subType: finalSubType, mimeType: file.type,
+                fileName: uuidName, originalName: file.name, room: room,
+                name: name, uuid: storedUuid, iv: ivB64, data: dataB64
+            }));
+
+            addMediaBubble(URL.createObjectURL(file), uuidName, file.name, true, finalSubType);
+        } catch (e) { console.error("ファイル送信失敗", e); }
     }
 
     function addBubble(text: string, isMe: boolean) {
-        const p = document.createElement("div");
-        p.textContent = text;
-        p.style.cssText = `max-width: 70%; padding: 10px 15px; border-radius: 18px; font-size: 14px; line-height: 1.4; word-wrap: break-word; position: relative;
-            ${isMe ? "align-self: flex-end; background: #0084ff; color: white;" : "align-self: flex-start; background: #e4e6eb; color: black;"}`;
-        chatBox.appendChild(p);
+        const bubble = document.createElement("div");
+        bubble.style.cssText = `max-width: 70%; padding: 8px 15px; border-radius: 18px; font-size: 15px; align-self: ${isMe ? "flex-end" : "flex-start"}; background-color: ${isMe ? "#0084ff" : "#e4e6eb"}; color: ${isMe ? "white" : "#050505"}; ${isMe ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;"}; word-break: break-all; white-space: pre-wrap;`;
+        
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        text.split(urlRegex).forEach(part => {
+            if (part.match(urlRegex)) {
+                const link = document.createElement("a");
+                link.href = part; link.textContent = part; link.target = "_blank"; link.rel = "noopener noreferrer";
+                link.style.cssText = `color: ${isMe ? "#fff" : "#0084ff"}; text-decoration: underline;`;
+                bubble.appendChild(link);
+            } else {
+                bubble.appendChild(document.createTextNode(part));
+            }
+        });
+        chatBox.appendChild(bubble);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+
+function addMediaBubble(url: string, uuidName: string, originalName: string, isMe: boolean, subType: any) {
+        const container = document.createElement("div");
+        container.style.cssText = `max-width: 70%; margin: 10px 0; padding: 8px; align-self: ${isMe ? "flex-end" : "flex-start"}; display: flex; flex-direction: column; gap: 6px; background: ${isMe ? "#0084ff" : "#e4e6eb"}; border-radius: 15px; ${isMe ? "border-bottom-right-radius: 4px;" : "border-bottom-left-radius: 4px;"}`;
+
+        // ★修正: originalName が undefined や null でも落ちないようにする
+        const safeName = originalName || "unknown_file";
+        const lower = safeName.toLowerCase();
+
+        const isVideo = lower.endsWith(".mp4") || lower.endsWith(".mov");
+        const isAudio = subType === "audio" || lower.endsWith(".mp3");
+
+        if (subType === "image" && !isVideo && !isAudio) {
+            const img = document.createElement("img");
+            img.src = url; img.style.cssText = "width: 100%; max-width: 250px; border-radius: 12px; cursor: pointer;";
+            img.onclick = () => window.open(url, '_blank');
+            container.appendChild(img);
+        } else if (isVideo) {
+            const video = document.createElement("video");
+            video.src = url; video.controls = true; video.style.cssText = "width: 100%; max-width: 250px; border-radius: 12px;";
+            container.appendChild(video);
+        } else if (isAudio) {
+            const audio = document.createElement("audio");
+            audio.src = url; audio.controls = true; audio.style.cssText = "width: 100%; min-width: 200px; max-width: 250px; height: 40px;";
+            container.appendChild(audio);
+        } else {
+            const icon = document.createElement("div");
+            icon.textContent = "📄 ファイル"; icon.style.cssText = "font-size: 24px; text-align: center;";
+            container.appendChild(icon);
+        }
+
+        const link = document.createElement("a");
+        link.href = url; 
+        link.download = safeName; // ★ここも safeName を使う
+        link.textContent = `📥 ${safeName}`;
+        link.style.cssText = `font-size: 12px; color: ${isMe ? "rgba(255,255,255,0.9)" : "#0084ff"}; text-decoration: none; font-weight: bold; display: block; margin-top: 4px;`;
+        
+        container.appendChild(link);
+        chatBox.appendChild(container);
         chatBox.scrollTop = chatBox.scrollHeight;
     }
 
     function addSystemMsg(msg: string) {
         const p = document.createElement("div");
-        p.textContent = msg;
-        p.style.cssText = "align-self: center; font-size: 12px; color: #888; margin: 10px 0;";
+        p.textContent = msg; p.style.cssText = "text-align: center; color: #888; font-size: 12px; margin: 10px;";
         chatBox.appendChild(p);
+        chatBox.scrollTop = chatBox.scrollHeight;
     }
 
-    // =================================================================
-    // 3. 鍵復元・メッセージ受信 (Map対応)
-    // =================================================================
+    async function handleFileSelect(event: Event, subType: "image" | "file" | "audio") {
+        const target = event.target as HTMLInputElement;
+        if (target.files?.[0]) {
+            await processFileAndSend(target.files[0], subType);
+            target.value = "";
+        }
+    }
+
+    async function fetchMySecurityData() {
+        const { data, error } = await supabase
+            .from('profile_users')
+            .select('ed25519_private, salt, iv')
+            .eq('uuid', storedUuid)
+            .maybeSingle();
+        if (error || !data) return null;
+        return data;
+    }
+
     async function restoreKey(pin: string) {
-        const { data: dbData } = await supabase.from('profile_users').select('*').eq('uuid', storedUuid).single();
-        if (!dbData) throw new Error("ユーザーデータなし");
-        const salt = await base64ToUint8Array(dbData.salt);
-        const iv = await base64ToUint8Array(dbData.iv);
-        const encryptedSeed = await base64ToUint8Array(dbData.ed25519_private);
-        const aesKey = await deriveKeyFromPin(pin, salt);
-        const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, aesKey, encryptedSeed.buffer as ArrayBuffer);
-        const seed = new Uint8Array(decryptedBuffer);
-        const { privateKey: xPriv } = await generateX25519KeyPair(seed);
-        return { xPriv };
-    }
+        const dbData = await fetchMySecurityData() as any;
+        if (!dbData || dbData.salt === null) {
+            console.log("鍵新規作成");
+            const salt: Uint8Array = generateSalt();
+            const masterSeed = generateMasterSeed(32);
+            const aesKey = await deriveKeyFromPin(pin.toString(), salt);
+            const encrypted = await encrypt(aesKey, masterSeed.buffer as ArrayBuffer);
+            const ivB64 = await arrayBufferToBase64(encrypted.iv);
+            const encryptedSeed = await arrayBufferToBase64(encrypted.data);
 
-    async function handleIncomingMessage(msg: any) {
-        const senderUuid = msg.uuid;
-        const isMe = (senderUuid === storedUuid);
+            const { privateKey, publicKey } = await generateEd25519KeyPair(new Uint8Array(masterSeed));
+            const { privateKey: xPriv, publicKey: xPub } = await generateX25519KeyPair(new Uint8Array(masterSeed));
 
-        // 相手の名前を登録
-        if (!isMe && msg.name) {
-            if (!friendNames.has(senderUuid)) {
-                friendNames.set(senderUuid, msg.name);
-                renderFriendList();
-            }
+            console.log("DB更新開始");
+            const { data, error } = await supabase
+                .from('profile_users')
+                .update({
+                    ed25519_pub: await arrayBufferToBase64(await crypto.subtle.exportKey("raw", publicKey)),
+                    ed25519_private: encryptedSeed,
+                    salt: await arrayBufferToBase64(salt),
+                    iv: ivB64,
+                    x25519_pub: await arrayBufferToBase64(await crypto.subtle.exportKey("raw", xPub))
+                })
+                .eq('uuid', storedUuid)
+                .select();
+
+            if (error) { console.error("DB更新失敗", error); return; }
+            if (!data || data.length === 0) return;
+
+            return { privateKey, publicKey, xPriv, xPub };
         }
 
-        // 鍵管理 (Map)
-        if (!isMe && !aesKeyCache.has(senderUuid)) {
-            try {
-                const { data: profile } = await supabase.from('profile_users').select('x25519_pub').eq('uuid', senderUuid).single();
-                const pin = localStorage.getItem("pin");
-                const myKeys = await restoreKey(pin!);
-                const theirRawKey = await base64ToUint8Array(profile.x25519_pub);
-                const theirPublicKey = await window.crypto.subtle.importKey("raw", theirRawKey.buffer as ArrayBuffer, { name: "X25519" }, true, []);
-                const sharedKey = await deriveSharedKey(myKeys.xPriv, theirPublicKey);
-                aesKeyCache.set(senderUuid, sharedKey);
-            } catch (e) { return console.error("鍵生成エラー", e); }
-        }
-
-        if (!isMe && senderUuid !== room) return; // 今開いている部屋以外は表示しない
-
+        console.log("鍵復元中...");
         try {
-            const keyToUse = isMe ? null : aesKeyCache.get(senderUuid);
-            if (!isMe && !keyToUse) return;
-
-            const iv = await base64ToUint8Array(msg.iv);
-            const encryptedData = await base64ToUint8Array(msg.data);
-            const decryptedBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, keyToUse!, encryptedData.buffer as ArrayBuffer);
-            addBubble(new TextDecoder().decode(new Uint8Array(decryptedBuffer)), isMe);
-        } catch (e) { console.error("復号失敗", e); }
+            const salt = await base64ToUint8Array(dbData.salt);
+            const iv = await base64ToUint8Array(dbData.iv);
+            const encryptedSeed = await base64ToUint8Array(dbData.ed25519_private);
+            const aesKey = await deriveKeyFromPin(pin, salt);
+            const decryptedBuffer = await crypto.subtle.decrypt(
+                { name: "AES-GCM", iv: iv.buffer as ArrayBuffer }, aesKey, encryptedSeed.buffer as ArrayBuffer
+            );
+            const seed = new Uint8Array(decryptedBuffer);
+            const { privateKey, publicKey } = await generateEd25519KeyPair(seed);
+            const { privateKey: xPriv, publicKey: xPub } = await generateX25519KeyPair(seed);
+            return { privateKey, publicKey, xPriv, xPub };
+        } catch (e) {
+            console.error("復元失敗:", e);
+            throw e;
+        }
     }
 
-    // =================================================================
-    // 4. 通信・イベント
-    // =================================================================
-    wss.onmessage = async (e) => {
-        const data = JSON.parse(e.data);
-        if (data.type === "message") await handleIncomingMessage(data);
-    };
-
-    btnroom.onclick = () => {
-        const target = inputroom.value.trim();
-        if (!target) return;
-        room = target;
-        roomSelection.style.display = "none";
-        chatContainer.style.display = "flex";
-        chatHeader.textContent = `宛先: ${target}`;
-        renderFriendList();
-    };
-
-    sendBtn.onclick = async () => {
-        const text = input.value.trim();
-        if (!text || !room) return;
-        
-        let currentKey = aesKeyCache.get(room);
-        if (!currentKey) {
-            // 送信相手の鍵も必要ならここで生成するロジックが必要（受信と同じ）
-            addSystemMsg("鍵を準備中...");
-            // ...鍵取得処理...
-        }
-        
-        // --- 暗号化してWSS送信 ---
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const encrypted = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, currentKey!, new TextEncoder().encode(text));
-        wss.send(JSON.stringify({
-            type: "message", uuid: storedUuid, name: name, to_uuid: room,
-            data: await arrayBufferToBase64(encrypted), iv: await arrayBufferToBase64(iv.buffer as ArrayBuffer),
-            subType: "text"
-        }));
-        addBubble(text, true);
-        input.value = "";
-    };
-
-    // 起動
-    if (autoRoom) btnroom.click();
+    async function emergencyWipe() {
+        if (!confirm("鍵データをすべて破棄し、ローカル情報も削除しますか？")) return;
+        console.log("緊急ワイプ");
+        await supabase.from('profile_users')
+            .update({ ed25519_pub: null, x25519_pub: null, ed25519_private: null, salt: null, iv: null })
+            .eq('uuid', storedUuid);
+        localStorage.clear();
+        sessionStorage.clear();
+        alert("削除完了");
+        location.reload();
+    }
 }
 
 main();
