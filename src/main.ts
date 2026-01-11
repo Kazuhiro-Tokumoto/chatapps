@@ -119,12 +119,17 @@ async function main() {
     const myName = localStorage.getItem("my_name");
 
     // 2. 招待用URLを作成 (今のページのURLをベースにする)
-    // 例: https://kazu.../chatapps/index.html?room=自分のUUID
-    const inviteUrl = `${window.location.origin}${window.location.pathname.replace('/dist/', '/')}/index.html?room=${myUuid}`;
+// 1. プロジェクトのルートURLを確定させる (GitHub Pages用)
+// どの階層にいても、ドメイン/chatapps/index.html を指すようにします
+    const baseUrl = "https://kazuhiro-tokumoto.github.io/chatapps/index.html";
 
-    // 3. QRコード生成APIのURLを作成 (goqr.me を使用)
-    // size=150x150, data=URL
-    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(inviteUrl)}`;
+    // 2. ルームID（自分のUUID）をパラメータとして結合
+    const inviteUrl = `${baseUrl}?room=${storedUuid}`;
+
+    // 3. これをQRコードAPIに渡す
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(inviteUrl)}`;
+
+    console.log("確定招待URL:", inviteUrl);
 
     // 4. UIに表示する (例: 設定ボタンを押した時に出す、またはサイドバーに置く)
     const myInfoContainer = document.createElement("div");
