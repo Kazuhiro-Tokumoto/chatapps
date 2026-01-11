@@ -92,6 +92,31 @@ async function main() {
     enemyencyWipeBtn.textContent = "データ削除";
     enemyencyWipeBtn.style.cssText = "position: fixed; top: 10px; left: 10px; padding: 8px 12px; border-radius: 8px; border: none; background: #ff4444; color: white; font-weight: bold; cursor: pointer; z-index: 1000;";
     document.body.appendChild(enemyencyWipeBtn);
+    // 1. 自分の情報を取得
+    const myUuid = localStorage.getItem("my_uuid");
+    const myName = localStorage.getItem("my_name");
+    // 2. 招待用URLを作成 (今のページのURLをベースにする)
+    // 例: https://kazu.../chatapps/index.html?room=自分のUUID
+    const inviteUrl = `${window.location.origin}${window.location.pathname.replace('/dist/', '/')}/index.html?room=${myUuid}`;
+    // 3. QRコード生成APIのURLを作成 (goqr.me を使用)
+    // size=150x150, data=URL
+    const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(inviteUrl)}`;
+    // 4. UIに表示する (例: 設定ボタンを押した時に出す、またはサイドバーに置く)
+    const myInfoContainer = document.createElement("div");
+    myInfoContainer.style.cssText = "padding: 20px; background: white; border-radius: 12px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.1); margin: 10px;";
+    myInfoContainer.innerHTML = `
+        <h3 style="margin: 0 0 10px 0;">自分の連絡先</h3>
+        <p style="font-size: 12px; color: #666; word-break: break-all;">UUID: ${myUuid}</p>
+        <img src="${qrImageUrl}" alt="My QR Code" style="margin: 10px 0; border: 1px solid #eee; padding: 5px;">
+        <p style="font-size: 11px; color: #888;">このQRを相手にスキャンしてもらうと<br>直接チャットが始まります</p>
+        <button id="copy-link-btn" style="padding: 5px 10px; font-size: 12px; cursor: pointer;">招待リンクをコピー</button>
+    `;
+    document.body.appendChild(myInfoContainer);
+    // リンクのコピー機能も付けておくと便利！
+    document.getElementById('copy-link-btn').onclick = () => {
+        navigator.clipboard.writeText(inviteUrl);
+        alert("リンクをコピーしました！");
+    };
     // =================================================================
     // 2. WebSocket イベント (★ここに移動させました！)
     // =================================================================
